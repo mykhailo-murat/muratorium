@@ -1,0 +1,7 @@
+APP_ENV=local
+DATABASE_URL=postgresql+psycopg://muratoriy:muratoriy@db:5432/muratoriy
+REDIS_URL=redis://redis:6379/0
+
+# Telegram publisher (later)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHANNEL_ID=

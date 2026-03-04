@@ -1,0 +1,80 @@
+### gitignore template
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.log
+
+# Virtualenv
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# Django
+*.sqlite3
+*.db
+db.sqlite3
+*.pyc
+*.pyo
+*.pyd
+media/
+staticfiles/
+static_root/
+public/static/
+instance/
+.local/
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media
+
+# Django stuff:
+*.pot
+*.mo
+*.log
+*.pot~
+*.pyc
+*.pyo
+__pycache__/
+
+# VSCode / PyCharm / other IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# MyPy / Coverage / Tests
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+
+# Poetry
+poetry.lock
+
+# Env files / secrets
+.env
+.env.*
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
