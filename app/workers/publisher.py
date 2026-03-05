@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from html import escape
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -14,11 +15,14 @@ SAFE_CHUNK = 3800
 
 
 def format_post(item: NewsItem) -> str:
-    parts = [f"UA {item.final_score}/100", item.title]
+    parts = [f"Score: {item.final_score}/100"]
+    if item.category:
+        parts.append(f"Category: {escape(item.category)}")
+    parts.append(escape(item.title))
     if item.short_summary:
-        parts.append(item.short_summary)
+        parts.append(escape(item.short_summary))
     if item.url:
-        parts.append(item.url)
+        parts.append(f'<a href="{escape(item.url, quote=True)}">source</a>')
     return "\n\n".join(parts)
 
 
@@ -92,7 +96,7 @@ def publish_to_telegram(news_item_id: int) -> None:
         if not item or item.is_published:
             return
 
-        send_telegram_text(format_post(item))
+        send_telegram_text(format_post(item), parse_mode="HTML")
 
         item.is_published = True
         item.published_to_telegram_at = datetime.now(timezone.utc)

@@ -4,7 +4,8 @@ Single-user news aggregation pipeline:
 - ingest RSS sources
 - deduplicate by source/external id + content hash
 - score selected items with OpenAI in batches
-- publish urgent items to Telegram with rate limiting
+- publish urgent items to Telegram immediately (fast lane)
+- publish digest 2 times per day (slow lane)
 
 ## Quick start
 
@@ -58,9 +59,13 @@ Required env:
 
 Behavior:
 - polling only ingests RSS items
+- fast lane runs every `FAST_POLL_SECONDS`:
+  - clusters repeated stories from multiple sources
+  - scores clusters with LLM
+  - publishes urgent clusters immediately (with idempotency + hourly rate limit)
 - digest task analyzes items with OpenAI 2 times per day: 15:00 and 21:00 (Europe/Kyiv)
 - strict JSON is validated; on invalid JSON one repair retry is performed
-- if LLM is disabled/fails, digest publish is skipped (safe mode)
+- if LLM is disabled/fails, auto-publish is skipped (safe mode)
 
 ### AI digest instruction
 
@@ -78,6 +83,21 @@ Run digest manually (test mode):
 docker compose exec -T worker celery -A app.workers.celery_app:celery call app.workers.tasks.analyze_and_publish_digest --kwargs='{"test_mode": true}'
 ```
 
+Run fast lane manually:
+```powershell
+docker compose exec -T worker celery -A app.workers.celery_app:celery call app.workers.tasks.process_urgent_candidates
+```
+
+Backfill existing news into clusters (one-time after enabling fast lane on old DB):
+```powershell
+docker compose exec -T worker celery -A app.workers.celery_app:celery call app.workers.tasks.backfill_clusters --args='[20000]'
+```
+
+Run cleanup manually:
+```powershell
+docker compose exec -T worker celery -A app.workers.celery_app:celery call app.workers.tasks.cleanup_old_records
+```
+
 ## Telegram publishing
 
 Required env:
@@ -87,8 +107,19 @@ Required env:
 Urgent publish rules:
 - `urgency >= URGENT_THRESHOLD`
 - `confidence >= CONFIDENCE_THRESHOLD`
-- `final_score` passes breaking threshold
+- `final_score >= FAST_SCORE_THRESHOLD`
+- `source_count >= FAST_MIN_SOURCES`
+- title similarity for clustering: `FAST_TITLE_SIMILARITY`
 - hourly limit: `URGENT_RATE_LIMIT_PER_HOUR`
+- no duplicates: guarded by `published_messages` keys per cluster
+
+## Data retention cleanup
+
+Daily cleanup task removes old data:
+- old published news: `CLEANUP_KEEP_PUBLISHED_DAYS`
+- old unpublished news: `CLEANUP_KEEP_UNPUBLISHED_DAYS`
+- old idempotency records: `CLEANUP_KEEP_MESSAGES_DAYS`
+- schedule: `CLEANUP_HOUR:CLEANUP_MINUTE` (Europe/Kyiv)
 
 Bot prerequisites:
 1. Add bot to channel as admin.

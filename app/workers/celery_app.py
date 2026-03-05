@@ -16,6 +16,10 @@ celery.conf.beat_schedule = {
         "task": "app.workers.tasks.poll_rss",
         "schedule": 300.0,
     },
+    "process-urgent-candidates-fast-lane": {
+        "task": "app.workers.tasks.process_urgent_candidates",
+        "schedule": float(max(settings.fast_poll_seconds, 60)),
+    },
     "digest-at-15-00": {
         "task": "app.workers.tasks.analyze_and_publish_digest",
         "schedule": crontab(hour=15, minute=0),
@@ -23,6 +27,10 @@ celery.conf.beat_schedule = {
     "digest-at-21-00": {
         "task": "app.workers.tasks.analyze_and_publish_digest",
         "schedule": crontab(hour=21, minute=0),
+    },
+    "cleanup-old-records-daily": {
+        "task": "app.workers.tasks.cleanup_old_records",
+        "schedule": crontab(hour=settings.cleanup_hour, minute=settings.cleanup_minute),
     },
 }
 
