@@ -1,4 +1,4 @@
-from sqlalchemy import String, Text, DateTime, Integer, Boolean, func, UniqueConstraint
+from sqlalchemy import String, Text, DateTime, Integer, Boolean, Float, func, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -38,4 +38,14 @@ class NewsItem(Base):
     # Normalization / ranking
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     final_score: Mapped[int] = mapped_column(Integer, default=0)  # 0..100
+    importance: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0..10
+    urgency: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0..10
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    short_summary: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    llm_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    llm_scored_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)
+
     is_published: Mapped[bool] = mapped_column(Boolean, default=False)
+    published_to_telegram_at: Mapped[DateTime | None] = mapped_column(DateTime, nullable=True)

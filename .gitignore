@@ -78,3 +78,6 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+AGENTS.md
+sources.txt
