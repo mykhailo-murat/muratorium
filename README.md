@@ -112,6 +112,7 @@ Urgent publish rules:
 - title similarity for clustering: `FAST_TITLE_SIMILARITY`
 - hourly limit: `URGENT_RATE_LIMIT_PER_HOUR`
 - no duplicates: guarded by `published_messages` keys per cluster
+- urgent post text is generated in Ukrainian (`title_uk`, `summary_uk`)
 
 ## Data retention cleanup
 
@@ -126,3 +127,34 @@ Bot prerequisites:
 2. Grant `Post Messages` permission.
 3. Use correct channel id (not @username).
 4. Ensure bot token is valid and rotated if leaked.
+
+## Source management API
+
+Base URL: `http://localhost:8000`
+
+List sources:
+```powershell
+curl http://localhost:8000/sources
+```
+
+Add RSS source:
+```powershell
+curl -X POST http://localhost:8000/sources ^
+  -H "Content-Type: application/json" ^
+  -d "{\"name\":\"The Guardian World\",\"url\":\"https://www.theguardian.com/world/rss\",\"trust_score\":7,\"is_enabled\":true}"
+```
+
+Disable source:
+```powershell
+curl -X PATCH http://localhost:8000/sources/6/disable
+```
+
+Enable source:
+```powershell
+curl -X PATCH http://localhost:8000/sources/6/enable
+```
+
+Delete source:
+```powershell
+curl -X DELETE http://localhost:8000/sources/6
+```

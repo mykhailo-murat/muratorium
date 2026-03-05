@@ -17,6 +17,8 @@ class LLMScore(BaseModel):
     urgency: int = Field(ge=0, le=10)
     confidence: float = Field(ge=0.0, le=1.0)
     category: str
+    title_uk: str
+    summary_uk: str
     short_summary: str
     reason: str
 
@@ -35,7 +37,8 @@ class ScoreInput:
 
 SYSTEM_PROMPT = (
     "You are a strict JSON scoring engine for urgent news triage. "
-    "Return JSON only with root object: {\"items\": [...]} and no markdown."
+    "Return JSON only with root object: {\"items\": [...]} and no markdown. "
+    "Always return Ukrainian text for title_uk and summary_uk."
 )
 
 
@@ -60,6 +63,8 @@ def _build_user_prompt(items: Iterable[ScoreInput]) -> str:
         "\"urgency\":int(0..10),"
         "\"confidence\":float(0..1),"
         "\"category\":string,"
+        "\"title_uk\":string,"
+        "\"summary_uk\":string,"
         "\"short_summary\":string(one line),"
         "\"reason\":string(one line)"
         "}]"

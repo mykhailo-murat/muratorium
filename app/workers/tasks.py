@@ -227,6 +227,13 @@ def process_urgent_candidates() -> int:
             cluster.last_urgency = scored.urgency
             cluster.last_confidence = scored.confidence
             cluster.last_score = final_score
+            item.title = scored.title_uk[:512]
+            item.short_summary = scored.summary_uk[:512]
+            item.category = scored.category[:64]
+            item.llm_reason = scored.reason[:512]
+            item.llm_model = settings.openai_model[:128]
+            item.llm_scored_at = datetime.now(timezone.utc)
+            item.final_score = final_score
 
             if (
                 scored.urgency < settings.urgent_threshold
@@ -248,6 +255,10 @@ def process_urgent_candidates() -> int:
                 .join(ClusterItem, ClusterItem.news_item_id == NewsItem.id)
                 .where(ClusterItem.cluster_id == cluster.id)
             ).all():
+                if linked_item.id != item.id:
+                    linked_item.category = item.category
+                    linked_item.llm_model = item.llm_model
+                    linked_item.llm_scored_at = item.llm_scored_at
                 linked_item.is_published = True
                 linked_item.published_to_telegram_at = now_utc
 
