@@ -47,9 +47,14 @@ def poll_rss() -> int:
         sources = db.scalars(
             select(Source).where(Source.kind == "rss", Source.is_enabled == True)  # noqa: E712
         ).all()
+        logger.info("RSS polling cycle started: enabled_sources=%s", len(sources))
 
         for src in sources:
+            fetched_for_source = 0
+            created_for_source = 0
+            duplicates_for_source = 0
             for raw in fetch_rss_items(src):
+                fetched_for_source += 1
                 item = to_news_item(src, raw)
                 item.final_score = calc_score(src.trust_score, item.title, item.content)
                 db.add(item)
@@ -58,9 +63,20 @@ def poll_rss() -> int:
                     assign_item_to_cluster(db, item=item, source=src)
                     db.commit()
                     created += 1
+                    created_for_source += 1
                 except IntegrityError:
                     db.rollback()
+                    duplicates_for_source += 1
                     continue
+            logger.info(
+                "RSS source processed: source_id=%s source_name=%s fetched=%s created=%s duplicates=%s",
+                src.id,
+                src.name,
+                fetched_for_source,
+                created_for_source,
+                duplicates_for_source,
+            )
+    logger.info("RSS polling cycle completed: created_total=%s", created)
     return created
 
 
@@ -174,7 +190,9 @@ def process_urgent_candidates() -> int:
     published_now = 0
     with SessionLocal() as db:
         slots_left = _urgent_slots_left(db)
+        logger.info("Urgent processing cycle started: slots_left=%s", slots_left)
         if slots_left <= 0:
+            logger.info("Urgent processing skipped: no rate-limit slots left")
             return 0
 
         candidates = db.execute(
@@ -187,6 +205,7 @@ def process_urgent_candidates() -> int:
             .order_by(StoryCluster.last_seen_at.desc())
             .limit(max(settings.llm_batch_size, 20))
         ).all()
+        logger.info("Urgent candidates selected: count=%s", len(candidates))
         if not candidates:
             return 0
 
@@ -200,7 +219,9 @@ def process_urgent_candidates() -> int:
             for cluster, item in candidates
         ]
         try:
+            logger.info("Sending urgent candidates to OpenAI: batch_size=%s", len(score_inputs))
             scores = score_batch(score_inputs)
+            logger.info("OpenAI urgent scoring result received: scored_clusters=%s", len(scores))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Urgent LLM scoring failed: %s", exc)
             return 0
@@ -215,6 +236,7 @@ def process_urgent_candidates() -> int:
 
             scored = scores.get(cluster.id)
             if not scored:
+                logger.warning("No LLM score for cluster=%s", cluster.id)
                 continue
 
             final_score = _to_final_score(
@@ -230,16 +252,38 @@ def process_urgent_candidates() -> int:
             item.title = scored.title_uk[:512]
             item.short_summary = scored.summary_uk[:512]
             item.category = scored.category[:64]
+            item.importance = scored.importance
+            item.urgency = scored.urgency
+            item.confidence = scored.confidence
             item.llm_reason = scored.reason[:512]
             item.llm_model = settings.openai_model[:128]
             item.llm_scored_at = datetime.now(timezone.utc)
             item.final_score = final_score
+            logger.info(
+                "Urgent score computed: cluster=%s importance=%s urgency=%s confidence=%.2f final_score=%s category=%s",
+                cluster.id,
+                scored.importance,
+                scored.urgency,
+                scored.confidence,
+                final_score,
+                scored.category,
+            )
 
             if (
                 scored.urgency < settings.urgent_threshold
                 or scored.confidence < settings.confidence_threshold
                 or final_score < settings.fast_score_threshold
             ):
+                logger.info(
+                    "Urgent publish skipped by thresholds: cluster=%s urgency=%s/%s confidence=%.2f/%.2f final_score=%s/%s",
+                    cluster.id,
+                    scored.urgency,
+                    settings.urgent_threshold,
+                    scored.confidence,
+                    settings.confidence_threshold,
+                    final_score,
+                    settings.fast_score_threshold,
+                )
                 continue
 
             try:
@@ -271,7 +315,9 @@ def process_urgent_candidates() -> int:
             )
             db.commit()
             published_now += 1
+            logger.info("Urgent cluster published: cluster=%s published_now=%s", cluster.id, published_now)
 
+    logger.info("Urgent processing cycle completed: published_now=%s", published_now)
     return published_now
 
 

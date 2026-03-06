@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field, ValidationError
 
 from app.services.llm_scoring import _call_openai
+
+logger = logging.getLogger(__name__)
 
 
 class DigestItem(BaseModel):
@@ -83,6 +86,12 @@ def select_digest_items(
 ) -> list[DigestItem]:
     if not candidates:
         return []
+    logger.info(
+        "Digest scoring started: candidates=%s top_n=%s min_score=%s",
+        len(candidates),
+        top_n,
+        min_score,
+    )
 
     base_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -92,7 +101,9 @@ def select_digest_items(
     raw = _call_openai(base_messages)
     try:
         parsed = DigestResponse.model_validate(json.loads(raw))
+        logger.info("Digest scoring parsed successfully: parsed_items=%s", len(parsed.items))
     except (json.JSONDecodeError, ValidationError):
+        logger.warning("Digest scoring parse failed; repair attempt will be used")
         repair_messages = [
             *base_messages,
             {"role": "assistant", "content": raw},
@@ -103,7 +114,9 @@ def select_digest_items(
         ]
         repaired = _call_openai(repair_messages)
         parsed = DigestResponse.model_validate(json.loads(repaired))
+        logger.info("Digest scoring repair parsed successfully: parsed_items=%s", len(parsed.items))
 
     filtered = [item for item in parsed.items if item.score >= min_score]
     filtered.sort(key=lambda x: x.score, reverse=True)
+    logger.info("Digest scoring completed: accepted_items=%s", len(filtered[:top_n]))
     return filtered[:top_n]

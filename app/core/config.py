@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     confidence_threshold: float = 0.7
     urgent_rate_limit_per_hour: int = 6
     digest_threshold: int = 6
+    log_level: str = "INFO"
+    log_file_path: str = "logs/pipeline.log"
+    log_rotation_days: int = 3
+    log_backup_count: int = 1
 
     class Config:
         env_file = ".env"
