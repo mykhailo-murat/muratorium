@@ -14,10 +14,26 @@ CRITICAL_KEYWORDS = {
     "\u043d\u043e\u0432\u0438\u0439 \u0448\u0442\u0430\u043c",
     "pandemic",
     "state of emergency",
+    "emergency declaration",
+    "biological threat",
+    "new variant",
+    "deadly variant",
 }
 
 HIGH_KEYWORDS = {
     "\u043c\u0430\u0441\u043e\u0432\u0430\u043d",
+    "\u043f\u0440\u0435\u0437\u0438\u0434\u0435\u043d\u0442",
+    "\u043b\u0456\u0434\u0435\u0440",
+    "\u0432\u0456\u0439\u043d",
+    "\u0432\u0442\u043e\u0440\u0433\u043d\u0435\u043d",
+    "\u0430\u0442\u0430\u043a",
+    "\u043d\u0430\u0446\u0431\u0435\u0437\u043f\u0435\u043a",
+    "\u0441\u0443\u0434",
+    "\u0443\u0440\u0430\u0436\u0435\u043d",
+    "\u0454\u0441",
+    "\u0441\u0448\u0430",
+    "\u0440\u043e\u0437\u0441\u043b\u0456\u0434\u0443\u0432\u0430\u043d",
+    "\u0443\u043a\u0440\u0430\u0457\u043d",
     "\u0440\u0430\u043a\u0435\u0442",
     "\u043e\u0431\u0441\u0442\u0440\u0456\u043b",
     "\u0443\u0434\u0430\u0440",
@@ -29,6 +45,10 @@ HIGH_KEYWORDS = {
     "attack",
     "missile",
     "explosion",
+    "airstrike",
+    "drone strike",
+    "major escalation",
+    "siege",
 }
 
 MEDIUM_KEYWORDS = {
@@ -45,6 +65,9 @@ MEDIUM_KEYWORDS = {
     "\u0432\u0456\u0439\u043d",
     "war",
     "\u0432\u043e\u0454\u043d",
+    "ceasefire",
+    "troop",
+    "military aid",
 }
 
 LOW_SIGNAL_KEYWORDS = {
@@ -57,19 +80,10 @@ LOW_SIGNAL_KEYWORDS = {
     "recommend",
     "forecast",
     "statement",
-}
-
-NON_URGENT_DAMPENERS = {
-    "\u0431\u0443\u0440",
-    "\u0442\u043e\u0440\u043d\u0430\u0434\u043e",
-    "\u0448\u0442\u043e\u0440\u043c",
-    "\u0441\u043d\u0456\u0433\u043e\u043f\u0430\u0434",
-    "\u0437\u0435\u043c\u043b\u0435\u0442\u0440\u0443\u0441 \u043c\u0430\u0433\u043d\u0456\u0442\u0443\u0434",
-    "weather",
-    "storm",
-    "tornado",
-    "wildfire",
-    "flood",
+    "urges",
+    "calls for",
+    "says",
+    "according to",
 }
 
 
@@ -101,7 +115,6 @@ def calc_score(
     high_hits = _count_hits(text, HIGH_KEYWORDS)
     medium_hits = _count_hits(text, MEDIUM_KEYWORDS)
     low_signal_hits = _count_hits(text, LOW_SIGNAL_KEYWORDS)
-    non_urgent_hits = _count_hits(text, NON_URGENT_DAMPENERS)
 
     score = 20
     score += min(critical_hits * 60, 80)
@@ -110,7 +123,6 @@ def calc_score(
     score += min(max(source_count - 1, 0) * 3, 12)
 
     score -= min(low_signal_hits * 8, 24)
-    score -= min(non_urgent_hits * 14, 42)
 
     cap = _score_cap(critical_hits, high_hits, medium_hits)
     return max(0, min(score, cap))
