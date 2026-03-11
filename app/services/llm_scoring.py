@@ -86,6 +86,13 @@ def _build_user_prompt(items: Iterable[ScoreInput]) -> str:
         "\"reason\":string(one line)"
         "}]"
         "}\n\n"
+        "Urgency rubric:\n"
+        "- urgency=10 only for extreme events with immediate large-scale impact (e.g. assassination of top leader, confirmed major conflict escalation, new dangerous epidemic strain).\n"
+        "- urgency=8..9 for major escalations with immediate risk.\n"
+        "- urgency=6..7 for important but not extreme developments.\n"
+        "- urgency=3..5 for routine high-interest updates.\n"
+        "- urgency=0..2 for background/noise.\n"
+        "Do not assign urgency=10 to weather damage reports or policy recommendations (for example: tornado damage, strategic oil reserve recommendation).\n\n"
         f"Input items:\n{json.dumps(rows, ensure_ascii=False)}"
     )
 

@@ -21,10 +21,29 @@ logger = logging.getLogger(__name__)
 
 
 def _to_final_score(importance: int, urgency: int, source_count: int, avg_trust: float) -> int:
-    base = int(((importance * 0.6) + (urgency * 0.4)) * 10)
+    base = int(((importance * 0.5) + (urgency * 0.5)) * 10)
     source_bonus = min(max(source_count - 1, 0) * 5, 15)
     trust_bonus = min(int(avg_trust * 2), 20)
     return min(base + source_bonus + trust_bonus, 100)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _local_urgent_score(cluster: StoryCluster, item: NewsItem) -> int:
+    trust_proxy = max(1, min(int(round(cluster.avg_trust_score or 0.0)), 10))
+    base_score = calc_score(
+        trust_proxy,
+        item.title,
+        item.content,
+        source_count=cluster.source_count,
+    )
+    return min(base_score, 100)
 
 
 def _urgent_slots_left(db) -> int:
@@ -189,12 +208,15 @@ def process_urgent_candidates() -> int:
 
     published_now = 0
     with SessionLocal() as db:
+        now_utc = datetime.now(timezone.utc)
+        urgent_batch_size = max(settings.urgent_llm_batch_size, 1)
         slots_left = _urgent_slots_left(db)
         logger.info("Urgent processing cycle started: slots_left=%s", slots_left)
         if slots_left <= 0:
             logger.info("Urgent processing skipped: no rate-limit slots left")
             return 0
 
+        scan_limit = max(urgent_batch_size * 4, urgent_batch_size)
         candidates = db.execute(
             select(StoryCluster, NewsItem)
             .join(NewsItem, NewsItem.id == StoryCluster.representative_news_id)
@@ -203,20 +225,75 @@ def process_urgent_candidates() -> int:
                 NewsItem.is_published == False,  # noqa: E712
             )
             .order_by(StoryCluster.last_seen_at.desc())
-            .limit(max(settings.llm_batch_size, 20))
+            .limit(scan_limit)
         ).all()
-        logger.info("Urgent candidates selected: count=%s", len(candidates))
+        logger.info(
+            "Urgent candidates selected: raw_count=%s scan_limit=%s llm_batch_size=%s",
+            len(candidates),
+            scan_limit,
+            urgent_batch_size,
+        )
         if not candidates:
             return 0
 
-        score_inputs = [
-            ScoreInput(
-                cluster_id=cluster.id,
-                source="cluster",
-                title=item.title,
-                content=item.content,
+        skipped_rescore = 0
+        skipped_cooldown = 0
+        skipped_prefilter = 0
+        score_inputs: list[ScoreInput] = []
+        for cluster, item in candidates:
+            cluster_last_seen = _as_utc(cluster.last_seen_at)
+            cluster_last_scored = _as_utc(cluster.last_scored_at)
+            if (
+                cluster_last_seen is not None
+                and cluster_last_scored is not None
+                and cluster_last_seen <= cluster_last_scored
+            ):
+                skipped_rescore += 1
+                continue
+
+            if (
+                cluster_last_scored is not None
+                and cluster.last_score is not None
+                and cluster.last_score < settings.fast_score_threshold
+            ):
+                age_minutes = (now_utc - cluster_last_scored).total_seconds() / 60.0
+                if age_minutes < settings.urgent_rescore_cooldown_minutes:
+                    skipped_cooldown += 1
+                    continue
+
+            local_score = _local_urgent_score(cluster, item)
+            if (
+                settings.urgent_prefilter_enabled
+                and local_score < settings.urgent_prefilter_threshold
+            ):
+                skipped_prefilter += 1
+                continue
+
+            score_inputs.append(
+                ScoreInput(
+                    cluster_id=cluster.id,
+                    source="cluster",
+                    title=item.title,
+                    content=item.content,
+                )
             )
-            for cluster, item in candidates
+            if len(score_inputs) >= urgent_batch_size:
+                break
+
+        logger.info(
+            "Urgent candidate filter stats: llm_candidates=%s skipped_rescore=%s skipped_cooldown=%s skipped_prefilter=%s",
+            len(score_inputs),
+            skipped_rescore,
+            skipped_cooldown,
+            skipped_prefilter,
+        )
+        if not score_inputs:
+            logger.info("Urgent processing skipped: no candidates after local filters")
+            return 0
+
+        llm_cluster_ids = {entry.cluster_id for entry in score_inputs}
+        scored_candidates = [
+            (cluster, item) for cluster, item in candidates if cluster.id in llm_cluster_ids
         ]
         try:
             logger.info("Sending urgent candidates to OpenAI: batch_size=%s", len(score_inputs))
@@ -226,7 +303,9 @@ def process_urgent_candidates() -> int:
             logger.exception("Urgent LLM scoring failed: %s", exc)
             return 0
 
-        for cluster, item in candidates:
+        skipped_by_thresholds = 0
+        missing_scores = 0
+        for cluster, item in scored_candidates:
             if published_now >= slots_left:
                 break
 
@@ -237,6 +316,7 @@ def process_urgent_candidates() -> int:
             scored = scores.get(cluster.id)
             if not scored:
                 logger.warning("No LLM score for cluster=%s", cluster.id)
+                missing_scores += 1
                 continue
 
             final_score = _to_final_score(
@@ -274,6 +354,7 @@ def process_urgent_candidates() -> int:
                 or scored.confidence < settings.confidence_threshold
                 or final_score < settings.fast_score_threshold
             ):
+                skipped_by_thresholds += 1
                 logger.info(
                     "Urgent publish skipped by thresholds: cluster=%s urgency=%s/%s confidence=%.2f/%.2f final_score=%s/%s",
                     cluster.id,
@@ -286,23 +367,35 @@ def process_urgent_candidates() -> int:
                 )
                 continue
 
+            cluster_id = cluster.id
+            item_id = item.id
+            synced_category = item.category
+            synced_model = item.llm_model
+            synced_scored_at = item.llm_scored_at
+            db.commit()
             try:
-                publish_to_telegram(item.id)
+                sent = publish_to_telegram(item_id)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Urgent publish failed for cluster=%s: %s", cluster.id, exc)
                 db.rollback()
                 continue
+            if not sent:
+                logger.info(
+                    "Urgent publish skipped by publisher guard: cluster=%s item_id=%s",
+                    cluster_id,
+                    item_id,
+                )
+                continue
 
-            now_utc = datetime.now(timezone.utc)
             for linked_item in db.scalars(
                 select(NewsItem)
                 .join(ClusterItem, ClusterItem.news_item_id == NewsItem.id)
-                .where(ClusterItem.cluster_id == cluster.id)
+                .where(ClusterItem.cluster_id == cluster_id)
             ).all():
-                if linked_item.id != item.id:
-                    linked_item.category = item.category
-                    linked_item.llm_model = item.llm_model
-                    linked_item.llm_scored_at = item.llm_scored_at
+                if linked_item.id != item_id:
+                    linked_item.category = synced_category
+                    linked_item.llm_model = synced_model
+                    linked_item.llm_scored_at = synced_scored_at
                 linked_item.is_published = True
                 linked_item.published_to_telegram_at = now_utc
 
@@ -311,13 +404,18 @@ def process_urgent_candidates() -> int:
                 channel="telegram",
                 message_key=msg_key,
                 mode="urgent",
-                payload_ref=str(cluster.id),
+                payload_ref=str(cluster_id),
             )
             db.commit()
             published_now += 1
-            logger.info("Urgent cluster published: cluster=%s published_now=%s", cluster.id, published_now)
+            logger.info("Urgent cluster published: cluster=%s published_now=%s", cluster_id, published_now)
 
-    logger.info("Urgent processing cycle completed: published_now=%s", published_now)
+    logger.info(
+        "Urgent processing cycle completed: published_now=%s skipped_by_thresholds=%s missing_scores=%s",
+        published_now,
+        skipped_by_thresholds,
+        missing_scores,
+    )
     return published_now
 
 
