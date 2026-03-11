@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from html import escape
+import logging
+import re
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -12,6 +14,14 @@ from app.workers.celery_app import celery
 
 TELEGRAM_MAX_TEXT = 4096
 SAFE_CHUNK = 3800
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+logger = logging.getLogger(__name__)
+
+
+def _is_ukrainian_text(text: str | None) -> bool:
+    if not text:
+        return False
+    return bool(_CYRILLIC_RE.search(text))
 
 
 def format_post(item: NewsItem) -> str:
@@ -87,17 +97,34 @@ def send_telegram_text(text: str, parse_mode: str | None = None) -> None:
     retry_jitter=True,
     max_retries=3,
 )
-def publish_to_telegram(news_item_id: int) -> None:
+def publish_to_telegram(news_item_id: int) -> bool:
     if not settings.telegram_bot_token or not settings.telegram_channel_id:
-        return
+        return False
 
     with SessionLocal() as db:
         item = db.scalar(select(NewsItem).where(NewsItem.id == news_item_id))
         if not item or item.is_published:
-            return
+            return False
+        if item.final_score < settings.fast_score_threshold:
+            logger.warning(
+                "Skip publish for news_item_id=%s: final_score=%s below threshold=%s",
+                news_item_id,
+                item.final_score,
+                settings.fast_score_threshold,
+            )
+            return False
+        if not _is_ukrainian_text(item.title) or (
+            item.short_summary and not _is_ukrainian_text(item.short_summary)
+        ):
+            logger.warning(
+                "Skip publish for news_item_id=%s: non-Ukrainian title/summary",
+                news_item_id,
+            )
+            return False
 
         send_telegram_text(format_post(item), parse_mode="HTML")
 
         item.is_published = True
         item.published_to_telegram_at = datetime.now(timezone.utc)
         db.commit()
+        return True
